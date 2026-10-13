@@ -1,0 +1,66 @@
+name: SSSB watch
+
+on:
+  schedule:
+    # 时间是 UTC。斯德哥尔摩夏令时 = UTC+2，冬令时 = UTC+1，下面的时间两种都能落在正确一侧
+    - cron: "30 6 * * 4"    # 周四 8:30/7:30  周一批截止（10:00）前最后看一眼
+    - cron: "15 9 * * 4"    # 周四 11:15/10:15 周四批刚发布
+    - cron: "30 12 * * 1"   # 周一 14:30/13:30 周四批截止（16:00）前最后看一眼
+    - cron: "15 15 * * 1"   # 周一 17:15/16:15 周一批刚发布
+    - cron: "0 16 * * *"    # 每天 18:00/17:00 兜底，接住临时放出和重新发布的房
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "保存页面 HTML / 截图 / XHR 列表"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency: sssb-watch
+
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MY_DAYS_BASE: ${{ vars.MY_DAYS_BASE }}
+          MY_DAYS_DATE: ${{ vars.MY_DAYS_DATE }}
+          AREAS: ${{ vars.AREAS || 'Forum,Domus,Nyponet,Roslagstull,Mjölner,Vätan,Lucidor,Fyrtalet,Apeln,Kurland,Kungshamra,Lappkärrsberget,Jerum,Hugin,Munin,Pax,Birka,Skärmarbrink,Strix' }}
+          CORRIDOR_AREAS: ${{ vars.CORRIDOR_AREAS || 'Forum,Domus,Nyponet,Roslagstull,Mjölner,Vätan,Lucidor,Fyrtalet,Apeln,Kurland,Kungshamra,Lappkärrsberget,Jerum,Hugin,Munin,Pax,Birka,Skärmarbrink,Strix' }}
+          MARGIN_DAYS: ${{ vars.MARGIN_DAYS || '60' }}
+          MIN_SIZE: ${{ vars.MIN_SIZE || '20' }}
+          DEBUG: ${{ inputs.debug && '1' || '0' }}
+        run: python sssb_watch.py
+
+      - name: Save state
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -m "sssb: update state" && git push)
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: debug
+          path: debug/
+          if-no-files-found: ignore
